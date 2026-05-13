@@ -16,28 +16,62 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
 
+class VerifyEmailRequest(BaseModel):
+    email: str
+    code: str
+
 class LoginRequest(BaseModel):
     email: str
     password: str
 
 # --- API МЕТОДЫ ---
 
-# 1. Регистрация
+# 1. РЕГИСТРАЦИЯ (Отправляет код на почту через Supabase Auth)
 @app.post("/auth/register")
 async def register(body: RegisterRequest):
-    # В Supabase Auth регистрация идет отдельно, 
-    # но для простоты пишем в твою таблицу users
-    res = supabase.table("users").insert({
-        "name": body.name,
-        "email": body.email,
-        "password": body.password
-    }).execute()
-    
-    if not res.data:
-        raise HTTPException(status_code=400, detail="Registration failed")
-    
-    user = res.data[0]
-    return {"message": "Success", "userId": user['id'], "email": user['email']}
+    try:
+        # Регистрация в системной таблице auth.users
+        auth_res = supabase.auth.sign_up({
+            "email": body.email,
+            "password": body.password,
+            "options": {
+                "data": {"display_name": body.name}
+            }
+        })
+        
+        # Дублируем данные в твою публичную таблицу users для связи с прогрессом
+        # Используем email как ключ, либо можно добавить колонку id_uuid
+        supabase.table("users").insert({
+            "name": body.name,
+            "email": body.email,
+            "password": body.password  # В продакшене лучше не хранить тут пароль в открытом виде
+        }).execute()
+
+        return {"message": "Код подтверждения отправлен на почту!"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# 2. ПОДТВЕРЖДЕНИЕ КОДА (OTP)
+@app.post("/auth/verify-email")
+async def verify_email(body: VerifyEmailRequest):
+    try:
+        # Проверяем цифровой код из письма
+        verify_res = supabase.auth.verify_otp({
+            "email": body.email,
+            "token": body.code,
+            "type": "signup"
+        })
+        
+        # Получаем данные пользователя из нашей таблицы для Android
+        user_res = supabase.table("users").select("*").eq("email", body.email).single().execute()
+        
+        return {
+            "message": "Success",
+            "token": verify_res.session.access_token,
+            "user": user_res.data
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Неверный код или срок его действия истек")
 
 # 2. Логин
 @app.post("/auth/login")
