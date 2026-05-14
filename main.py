@@ -128,8 +128,13 @@ async def get_subchapters(chapterId: int):
 @app.get("/course/subchapters/{subchapterId}/materials")
 async def get_materials(subchapterId: int):
     res = supabase.table("materials").select("*").eq("subchapter_id", subchapterId).execute()
-    # Твой Android ждет объект MaterialsResponse, подстроим под него
-    return {"materials": res.data}
+    all_data = res.data
+    
+    # Распределяем по спискам, как ждет Android
+    return {
+        "theory": [m for m in all_data if m['type'] == 'theory'],
+        "practice": [m for m in all_data if m['type'] == 'practice']
+    }
 
 # 6. Задачи (для Task.java)
 @app.get("/tasks/subchapter/{subchapterId}")
